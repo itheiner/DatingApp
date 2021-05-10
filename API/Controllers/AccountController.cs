@@ -10,11 +10,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace API.Controllers
 {
-    public class AccountController : BaseAPIController
+    public class AccountController : BaseApiController
     {
         private readonly DataContext _context;
         private readonly ITokenService _tokenService;
-
         public AccountController(DataContext context, ITokenService tokenService)
         {
             _tokenService = tokenService;
@@ -23,48 +22,24 @@ namespace API.Controllers
         }
 
         [HttpPost("register")]
-        public async Task<ActionResult<UserDTO>> Register(RegisterDTO registerDTO)
+        public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
         {
-            //check if user exists
-            if (await UserExists(registerDTO.Username)) return BadRequest("Username is taken");
+            //check to see if the user exists
+            if (await UserExists(registerDto.Username)) return BadRequest("Username is taken");
+
             using var hmac = new HMACSHA512();
-            //create new user
+
             var user = new AppUser
             {
-                UserName = registerDTO.Username.ToLower(),
-                PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(registerDTO.Password)),
-                PasswordSalt = hmac.Key,
+                UserName = registerDto.Username.ToLower(),
+                PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(registerDto.Password)),
+                PasswordSalt = hmac.Key
             };
 
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            _context.Users.Add(user);//this is just setting it to be tracked by ef
+            await _context.SaveChangesAsync();//commit these changes
 
-            return new UserDTO{
-                Username = user.UserName,
-                Token = _tokenService.CreateToken(user)
-            };
-
-        }
-
-        [HttpPost("login")]
-        public async Task<ActionResult<UserDTO>> Login(LoginDTO loginDTO)
-        {
-            //check if the user already exists
-            var user = await _context.Users.SingleOrDefaultAsync(x => x.UserName == loginDTO.Username);
-
-            if (user == null) return Unauthorized("Invalid User");
-
-            //no that the user is not null lets check and see if the password matches
-            using var hmac = new HMACSHA512(user.PasswordSalt);
-            //get the computed hash
-            var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(loginDTO.Password));
-            //lets compare the two
-            for (int i = 0; i < computedHash.Length; i++)
-            {
-                if (computedHash[i] != user.PasswordHash[i]) return Unauthorized("Invalid Password!");
-            }
-            //if we get to this point then the user is good so return the user
-            return new UserDTO{
+            return new UserDto{
                 Username = user.UserName,
                 Token = _tokenService.CreateToken(user)
             };
@@ -72,7 +47,36 @@ namespace API.Controllers
 
         private async Task<bool> UserExists(string username)
         {
+            //this will return true if the user exists
             return await _context.Users.AnyAsync(x => x.UserName == username.ToLower());
+        }
+
+        [HttpPost("login")]
+        public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
+        {
+            //this will see search for only on instance of the username
+            //it will throw and exception if there are more than one
+            var user = await _context.Users.SingleOrDefaultAsync(x => x.UserName == loginDto.Username.ToLower());
+            //if the user ends up being null, then you will get a response of
+            //unathorized user
+            if (user == null) return Unauthorized("Invalid Username");
+            //if we get this far then we have a valid username
+            //lets now check the password
+            using var hmac = new HMACSHA512(user.PasswordSalt);
+
+            var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(loginDto.Password));
+            //lets compare the hashes
+            //because it is a byte array we have to loop over each item in the array
+            for (int i = 0; i < computedHash.Length; i++)
+            {
+                if (computedHash[i] != user.PasswordHash[i]) return Unauthorized("Invalid Password");
+            }
+
+            //if we got to here the user is valid and the password matches
+            return new UserDto{
+                Username = user.UserName,
+                Token = _tokenService.CreateToken(user)
+            };
         }
     }
 }
